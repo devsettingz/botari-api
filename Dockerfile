@@ -1,40 +1,66 @@
-# Use a stable Node version that works with sharp and Puppeteer
-FROM node:18-alpine AS base
+# ----------------------------
+# Stage 1: Base image
+# ----------------------------
+FROM node:22.0.0-alpine AS base
+
 WORKDIR /usr/src/wpp-server
 
 # Environment variables
 ENV NODE_ENV=production \
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
-# Install required system libraries
-RUN apk update && apk add --no-cache \
+# Copy dependency definitions
+COPY package.json yarn.lock ./
+
+# Install system dependencies (for sharp, puppeteer, etc.)
+RUN apk update && \
+    apk add --no-cache \
     vips-dev \
     fftw-dev \
-    build-base \
-    libc6-compat \
-    chromium \
-    python3 \
-    make \
+    gcc \
     g++ \
-    gcc
+    make \
+    libc6-compat \
+    python3 \
+    chromium && \
+    rm -rf /var/cache/apk/*
 
-# Copy and install dependencies
-COPY package.json yarn.lock* ./
+# Install production dependencies and sharp
+RUN yarn install --production --pure-lockfile && \
+    yarn add sharp --ignore-engines && \
+    yarn cache clean
+
+# ----------------------------
+# Stage 2: Build stage
+# ----------------------------
+FROM node:22.0.0-alpine AS build
+
+WORKDIR /usr/src/wpp-server
+
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+
+COPY package.json yarn.lock ./
 RUN yarn install --production=false --pure-lockfile && yarn cache clean
 
-# Copy rest of project and build
+# Copy source code and build
 COPY . .
 RUN yarn build
 
-# Final stage
-FROM node:18-alpine
+# ----------------------------
+# Stage 3: Final runtime image
+# ----------------------------
+FROM node:22.0.0-alpine
+
 WORKDIR /usr/src/wpp-server
 
-# Install minimal runtime dependencies
-RUN apk add --no-cache chromium vips-dev libc6-compat
+# Install chromium runtime for puppeteer
+RUN apk add --no-cache chromium
 
-ENV NODE_ENV=production
-COPY --from=base /usr/src/wpp-server /usr/src/wpp-server
+# Copy built files from the previous stage
+COPY --from=build /usr/src/wpp-server/ /usr/src/wpp-server/
 
+# Expose the default port
 EXPOSE 21465
-CMD ["node", "dist/server.js"]
+
+# Start the app
+ENTRYPOINT ["node", "dist/server.js"]
