@@ -1,34 +1,40 @@
-FROM node:22.20.0-alpine AS base
+# Use a stable Node version that works with sharp and Puppeteer
+FROM node:18-alpine AS base
 WORKDIR /usr/src/wpp-server
-ENV NODE_ENV=production PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-COPY package.json ./
-RUN apk update && \
-    apk add --no-cache \
+
+# Environment variables
+ENV NODE_ENV=production \
+    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+
+# Install required system libraries
+RUN apk update && apk add --no-cache \
     vips-dev \
     fftw-dev \
-    gcc \
-    g++ \
-    make \
+    build-base \
     libc6-compat \
-    && rm -rf /var/cache/apk/*
-RUN yarn install --production --pure-lockfile && \
-    yarn add sharp --ignore-engines && \
-    yarn cache clean
+    chromium \
+    python3 \
+    make \
+    g++ \
+    gcc
 
-FROM base AS build
-WORKDIR /usr/src/wpp-server
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-COPY package.json  ./
-RUN yarn install --production=false --pure-lockfile
-RUN yarn cache clean
+# Copy and install dependencies
+COPY package.json yarn.lock* ./
+RUN yarn install --production=false --pure-lockfile && yarn cache clean
+
+# Copy rest of project and build
 COPY . .
 RUN yarn build
 
-FROM base
-WORKDIR /usr/src/wpp-server/
-RUN apk add --no-cache chromium
-RUN yarn cache clean
-COPY . .
-COPY --from=build /usr/src/wpp-server/ /usr/src/wpp-server/
+# Final stage
+FROM node:18-alpine
+WORKDIR /usr/src/wpp-server
+
+# Install minimal runtime dependencies
+RUN apk add --no-cache chromium vips-dev libc6-compat
+
+ENV NODE_ENV=production
+COPY --from=base /usr/src/wpp-server /usr/src/wpp-server
+
 EXPOSE 21465
-ENTRYPOINT ["node", "dist/server.js"]
+CMD ["node", "dist/server.js"]
