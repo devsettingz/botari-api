@@ -100,6 +100,11 @@ export function initServer(serverOptions: Partial<ServerOptions>): {
 
   app.use(routes);
 
+  // ✅ Add a simple test route for Render
+  app.get('/', (req, res) => {
+    res.send('✅ Botari API is running successfully on Render!');
+  });
+
   createFolders();
   const http = createServer(app);
   const io = new Socket(http, {
