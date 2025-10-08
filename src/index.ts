@@ -1,19 +1,3 @@
-/*
- * Copyright 2021 WPPConnect Team
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 import { defaultLogger } from '@wppconnect-team/wppconnect';
 import cors from 'cors';
 import express, { Express, NextFunction, Router } from 'express';
@@ -23,6 +7,7 @@ import mergeDeep from 'merge-deep';
 import process from 'process';
 import { Server as Socket } from 'socket.io';
 import { Logger } from 'winston';
+import jwt from 'jsonwebtoken';
 
 import { version } from '../package.json';
 import config from './config';
@@ -35,8 +20,6 @@ import {
   startAllSessions,
 } from './util/functions';
 import { createLogger } from './util/logger';
-
-//require('dotenv').config();
 
 export const logger = createLogger(config.log);
 
@@ -70,7 +53,7 @@ export function initServer(serverOptions: Partial<ServerOptions>): {
     process.env['AWS_SECRET_ACCESS_KEY'] = config.aws_s3.secret_key;
   }
 
-  // Add request options
+  // Middleware: attach server options and logger
   app.use((req: any, res: any, next: NextFunction) => {
     req.serverOptions = serverOptions;
     req.logger = logger;
@@ -98,11 +81,32 @@ export function initServer(serverOptions: Partial<ServerOptions>): {
     next();
   });
 
+  // Use existing routes
   app.use(routes);
 
-  // ✅ Add a simple test route for Render
+  // ✅ Health check route
   app.get('/', (req, res) => {
     res.send('✅ Botari API is running successfully on Render!');
+  });
+
+  // ✅ Token generation route for Postman testing
+  app.post('/api/session/:session/generate-token', (req, res) => {
+    try {
+      const { secretkey } = req.body;
+      if (!secretkey || secretkey !== process.env.BOTARI_SECRET_KEY) {
+        return res.status(401).json({ error: 'Invalid or missing secret key' });
+      }
+
+      const { session } = req.params;
+      const token = jwt.sign({ session }, process.env.JWT_SECRET || 'botari_secret', {
+        expiresIn: '1h',
+      });
+
+      res.json({ session, token, expiresIn: '1h' });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ error: 'Token generation failed' });
+    }
   });
 
   createFolders();
@@ -114,10 +118,10 @@ export function initServer(serverOptions: Partial<ServerOptions>): {
   });
 
   io.on('connection', (sock) => {
-    logger.info(`ID: ${sock.id} entrou`);
+    logger.info(`ID: ${sock.id} connected`);
 
     sock.on('disconnect', () => {
-      logger.info(`ID: ${sock.id} saiu`);
+      logger.info(`ID: ${sock.id} disconnected`);
     });
   });
 
