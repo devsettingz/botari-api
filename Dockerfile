@@ -1,30 +1,31 @@
 # ----------------------------
 # Stage 1: Build
 # ----------------------------
-FROM node:22.20.0-alpine AS build
+FROM node:22.10.0-alpine AS build
+# Use a slightly more stable Alpine build; Render supports this better
 
 WORKDIR /usr/src/wpp-server
 
-# Copy package files first (for better caching)
+# Copy package files first (for caching)
 COPY package*.json ./
 
-# Install all dependencies (including devDependencies for build)
-RUN npm ci --legacy-peer-deps
+# Install dependencies (include dev deps for build)
+RUN npm install --force
 
 # Copy source code
 COPY . .
 
-# Build the TypeScript project
+# Build TypeScript
 RUN npm run build
 
 # ----------------------------
 # Stage 2: Runtime
 # ----------------------------
-FROM node:22.20.0-alpine
+FROM node:22.10.0-alpine
 
 WORKDIR /usr/src/wpp-server
 
-# Install Chromium for Puppeteer/WPPConnect
+# Install Chromium and required fonts/libs for Puppeteer or WPPConnect
 RUN apk add --no-cache \
     chromium \
     nss \
@@ -33,20 +34,20 @@ RUN apk add --no-cache \
     ca-certificates \
     ttf-freefont
 
-# Copy only built files and necessary modules from build stage
+# Copy compiled dist and minimal files from build stage
 COPY --from=build /usr/src/wpp-server/dist ./dist
 COPY --from=build /usr/src/wpp-server/package*.json ./
 
 # Install only production dependencies
-RUN npm ci --only=production --legacy-peer-deps
+RUN npm install --omit=dev --force
 
-# Expose server port
-EXPOSE 21465
-
-# Environment variables for Puppeteer
+# Set Puppeteer environment vars (skip chromium download)
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     CHROME_PATH=/usr/bin/chromium-browser \
     NODE_ENV=production
 
-# Start the server
-CMD ["node", "dist/server.js"]
+# Expose the same port your server listens on
+EXPOSE 21465
+
+# Start your compiled app
+CMD ["node", "dist/index.js"]
